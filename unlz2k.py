@@ -116,7 +116,7 @@ def process_dicts(val0, dict0, val1, dict1):
     if val0 <= 0:
         return
     shift = 15 - val1
-    mask = 1 << shift
+    var_50 = 1 << shift
     tmp_val0 = val0
     for i in range(0, val0):
         ind = dict0[i]
@@ -136,7 +136,7 @@ def process_dicts(val0, dict0, val1, dict1):
                             tmp_dict[tmp_offs] = tmp_val0
                             tmp_val0 += 1
                         tmp_offs = tmp_dict[tmp_offs]
-                        if tmp_dest_val & mask == 0:
+                        if tmp_dest_val & var_50 == 0:
                             tmp_dict = word_dict1
                         else:
                             tmp_dict = word_dict2
@@ -153,6 +153,7 @@ def setup_byte_and_word_dicts(length, bits, special_ind):
     global byte_dict1
     global word_dict0
     tmp_val = bitstream >> (32 - bits) # bits is never 0
+    # print('setup tmp_val = {}'.format(tmp_val))
     load_into_bitstream(bits)
     if tmp_val != 0:
         tmp_val2 = 0
@@ -265,12 +266,15 @@ def decode_bitstream():
     chunks_with_current_setup -= 1
     tmp_val = word_dict3[bitstream >> 20]
     if tmp_val >= 510:
+        #print('decode_bitstream tmp_val = {:<3X}'.format(tmp_val))
         mask = 0x80000
         while (tmp_val >= 510):
             if bitstream & mask == 0:
                 tmp_val = word_dict1[tmp_val]
+                #print('tmp_val dict1 = {:<3X}'.format(tmp_val))
             else:
                 tmp_val = word_dict2[tmp_val]
+                #print('tmp_val dict2 = {:<3X}'.format(tmp_val))
             mask >>= 1
     bits = byte_dict0[tmp_val]
     load_into_bitstream(bits)
@@ -283,7 +287,9 @@ def decode_bitstream_for_literals():
     global word_dict1
     global word_dict2
     tmp_offs = bitstream >> 24
+    #print('tmp_offs = {:<2X}'.format(tmp_offs))
     tmp_val = word_dict0[tmp_offs]
+    #print('tmp_val = {}'.format(tmp_val))
     if tmp_val >= 14:
         mask = 0x800000
         while tmp_val >= 14:
@@ -293,14 +299,18 @@ def decode_bitstream_for_literals():
                 tmp_val = word_dict2[tmp_val]
             mask >>= 1
     bits = byte_dict1[tmp_val]
+    #print('bits = {}'.format(bits))
     load_into_bitstream(bits)
     if tmp_val == 0:
+        #print('returning 0')
         return 0
     if tmp_val == 1:
+        #print('returning 2')
         return 2
     tmp_val -= 1
     tmp_bitstream = bitstream >> (32 - tmp_val)
     load_into_bitstream(tmp_val)
+    #print('returning {}'.format(tmp_bitstream + (1 << tmp_val)))
     return tmp_bitstream + (1 << tmp_val)
 
 def read_and_decrypt(length, dest):
@@ -324,7 +334,9 @@ def read_and_decrypt(length, dest):
         literals_to_copy = tmp_to_copy
         read_offset = tmp_read_offs
     while output_offs < length:
+        #print('bitstream = {:<8X}'.format(bitstream))
         tmp_val = decode_bitstream()
+        #print('tmp_val = {:<8X}'.format(tmp_val))
         if tmp_val <= 255:
             dest[output_offs] = tmp_val
             output_offs += 1
@@ -332,6 +344,7 @@ def read_and_decrypt(length, dest):
                 return
         else:
             tmp_to_copy = decode_bitstream_for_literals()
+            #print('tmp_to_copy = {}'.format(tmp_to_copy))
             tmp_read_offs = output_offs - tmp_to_copy - 1
             tmp_to_copy = tmp_val - 254
             tmp_read_offs &= 0x1FFF
@@ -347,6 +360,7 @@ def read_and_decrypt(length, dest):
                     return
                 tmp_to_copy -= 1
                 literals_to_copy = tmp_to_copy
+        #time.sleep(1)
     if output_offs > length:
         print('Error: went farther than given length')
 
@@ -400,6 +414,8 @@ def unlz2k_chunk(src, dest, src_size, dest_size):
         copy_to_file(dest, tmp_chunk, chunk_size)
         bytes_written += chunk_size
         bytes_left -= chunk_size
+        #print('bytes_written: {:<6X}'.format(bytes_written))
+        #print('bytes_left: {:<6X}'.format(bytes_left))
     return bytes_written
 
 def unlz2k(src, dest, src_size, dest_size):
@@ -423,7 +439,7 @@ def unlz2k(src, dest, src_size, dest_size):
 # TEST PROGRAM #
 ################
 
-
+"""
 src = open('file.DDS', 'rb')
 dest = open('file.DDS.dec', 'wb')
 packed = 0x1CC81
@@ -431,4 +447,4 @@ unpacked = 0x60080
 unlz2k(src, dest, packed, unpacked)
 src.close()
 dest.close()
-
+"""
