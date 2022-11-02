@@ -8,6 +8,7 @@
 
 uint8_t *compressedFile;
 size_t tmpSrcOffs;
+size_t tmpSrcSize;
 size_t tmpDestSize;
 uint32_t bitstream;
 uint8_t lastByteRead;
@@ -23,6 +24,7 @@ uint16_t wordDict1[1024];
 uint16_t wordDict2[1024];
 uint16_t wordDict3[4096];
 const char *lz2k = "LZ2K";
+uint32_t tmpCounter = 0;
 
 size_t unlz2k_chunk(std::ifstream &, std::ofstream &, size_t, size_t);
 void loadIntoBitstream(uint8_t);
@@ -85,6 +87,7 @@ size_t unlz2k_chunk(std::ifstream &src, std::ofstream &dest, size_t srcSize,
   // Read file into memory location
   src.read((char *)compressedFile, srcSize);
   tmpSrcOffs = 0;
+  tmpSrcSize = srcSize;
   bitstream = 0;
   lastByteRead = 0;
   previousBitAlign = 0;
@@ -112,7 +115,11 @@ void loadIntoBitstream(uint8_t bits) {
     do {
       bits -= prev;
       bitstream |= data << bits;
-      data = compressedFile[tmpSrcOffs++];
+      if (tmpSrcOffs == tmpSrcSize) {
+        data = 0;
+      } else {
+        data = compressedFile[tmpSrcOffs++];
+      }
       prev = 8;
     } while (bits > prev);
     lastByteRead = data;
@@ -302,12 +309,12 @@ void setupByteDict0() {
       uint32_t mask = 0x800000;
       do {
         if (!(bitstream & mask)) {
-          tmpVal2 = wordDict1[tmpVal];
+          tmpVal2 = wordDict1[tmpVal2];
         } else {
-          tmpVal2 = wordDict2[tmpVal];
+          tmpVal2 = wordDict2[tmpVal2];
         }
         mask >>= 1;
-      } while (tmpVal >= 19);
+      } while (tmpVal2 >= 19);
     }
     uint8_t bits = byteDict1[tmpVal2];
     loadIntoBitstream(bits);
@@ -341,7 +348,6 @@ void setupByteDict0() {
 
 void processDicts(uint16_t bytesLen, uint8_t *bytes, uint8_t pivot,
                   uint16_t *words) {
-
   uint16_t srcDict[17] = {0};
   uint16_t destDict[18];
   destDict[1] = 0;

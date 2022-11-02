@@ -8,7 +8,7 @@
 // This is just a test program to use on a single file.
 // Give it one command-line argument with the file name.
 int main(int argc, char *argv[]) {
-  if (argc == 0) {
+  if (argc < 2) {
     std::cout << "Please specify a filename.\n";
     return 1;
   }
@@ -20,8 +20,8 @@ int main(int argc, char *argv[]) {
   src.open(filename, std::ios::in | std::ios::binary);
   std::ofstream dest;
   dest.open(destFilename, std::ios::out | std::ios::binary);
-  size_t packed = 0x1CC81;
-  size_t unpacked = 0x60080;
+  size_t packed = 0x1D647BA;
+  size_t unpacked = 0x37701F4;
   unlz2k(src, dest, packed, unpacked);
   std::cout << "Done.\n";
 }

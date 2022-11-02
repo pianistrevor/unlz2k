@@ -21,6 +21,7 @@ word_dict0 = None # 256 word dictionary
 word_dict1 = None # 1024 word dictionary
 word_dict2 = None # 1024 word dictionary
 word_dict3 = None # 4096 word dictionary
+counter = 0
 
 #############
 # FUNCTIONS #
@@ -36,6 +37,10 @@ def load_into_bitstream(bits):
     global last_byte_read
     global tmp_src
     global tmp_src_size
+    if counter == 53 and bitstream == 0x285cc929:
+        print('bitstream is now {:<8X}'.format(bitstream))
+        print('tmpSrc is now at {:<8X}'.format(tmp_src.tell()))
+        print('tmp_src_size is now {:<8X}'.format(tmp_src_size))
     bitstream <<= bits
     last_op_diff = previous_bit_align
     data = last_byte_read
@@ -92,6 +97,9 @@ def process_dicts(val0, dict0, val1, dict1):
         high &= 0xFFFF
         tmp_dest_dict[ind] = high
         shift -= 4
+    if counter == 1042:
+        print(tmp_src_dict.values())
+        print(tmp_dest_dict.values())
     if tmp_dest_dict[17] != 0:
         print('Bad table')
         exit(1)
@@ -199,7 +207,16 @@ def setup_byte_dict0():
     global word_dict1
     global word_dict2
     global word_dict3
+    global counter
+    print('SetupByteDict0 called. ({})'.format(counter))
+    if counter == 53:
+        print('Pre-54 values.')
+        print(byte_dict0.values())
+        print(word_dict3.values())
+    counter += 1
+    print('bitstream = {:<4X}'.format(bitstream))
     tmp_val = bitstream >> 23
+    print('tmp_val = {:<4X}'.format(tmp_val))
     load_into_bitstream(9)
     if tmp_val == 0:
         tmp_val2 = bitstream >> 23
@@ -392,6 +409,7 @@ def unlz2k_chunk(src, dest, src_size, dest_size):
     # Local variables
     bytes_left = dest_size
     bytes_written = 0
+    print('Current file is at {:<8X}'.format(tmp_src.tell()))
     
     load_into_bitstream(32)
     while (bytes_left != 0):
@@ -424,10 +442,10 @@ def unlz2k(src, dest, src_size, dest_size):
 ################
 
 
-src = open('file.DDS', 'rb')
-dest = open('file.DDS.dec', 'wb')
-packed = 0x1CC81
-unpacked = 0x60080
+src = open('4.GSC', 'rb')
+dest = open('4.GSC.dec', 'wb')
+packed = 0x1D647BA
+unpacked = 0x37701F4
 unlz2k(src, dest, packed, unpacked)
 src.close()
 dest.close()
