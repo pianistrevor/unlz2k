@@ -21,7 +21,6 @@ word_dict0 = None # 256 word dictionary
 word_dict1 = None # 1024 word dictionary
 word_dict2 = None # 1024 word dictionary
 word_dict3 = None # 4096 word dictionary
-counter = 0
 
 #############
 # FUNCTIONS #
@@ -37,10 +36,6 @@ def load_into_bitstream(bits):
     global last_byte_read
     global tmp_src
     global tmp_src_size
-    if counter == 53 and bitstream == 0x285cc929:
-        print('bitstream is now {:<8X}'.format(bitstream))
-        print('tmpSrc is now at {:<8X}'.format(tmp_src.tell()))
-        print('tmp_src_size is now {:<8X}'.format(tmp_src_size))
     bitstream <<= bits
     last_op_diff = previous_bit_align
     data = last_byte_read
@@ -97,9 +92,6 @@ def process_dicts(val0, dict0, val1, dict1):
         high &= 0xFFFF
         tmp_dest_dict[ind] = high
         shift -= 4
-    if counter == 1042:
-        print(tmp_src_dict.values())
-        print(tmp_dest_dict.values())
     if tmp_dest_dict[17] != 0:
         print('Bad table')
         exit(1)
@@ -207,16 +199,7 @@ def setup_byte_dict0():
     global word_dict1
     global word_dict2
     global word_dict3
-    global counter
-    print('SetupByteDict0 called. ({})'.format(counter))
-    if counter == 53:
-        print('Pre-54 values.')
-        print(byte_dict0.values())
-        print(word_dict3.values())
-    counter += 1
-    print('bitstream = {:<4X}'.format(bitstream))
     tmp_val = bitstream >> 23
-    print('tmp_val = {:<4X}'.format(tmp_val))
     load_into_bitstream(9)
     if tmp_val == 0:
         tmp_val2 = bitstream >> 23
@@ -409,7 +392,6 @@ def unlz2k_chunk(src, dest, src_size, dest_size):
     # Local variables
     bytes_left = dest_size
     bytes_written = 0
-    print('Current file is at {:<8X}'.format(tmp_src.tell()))
     
     load_into_bitstream(32)
     while (bytes_left != 0):
@@ -421,7 +403,6 @@ def unlz2k_chunk(src, dest, src_size, dest_size):
     return bytes_written
 
 def unlz2k(src, dest, src_size, dest_size):
-    original_src = src.tell()
     bytes_written = 0
     while bytes_written < dest_size:
         lz2k = src.read(4)
@@ -434,19 +415,38 @@ def unlz2k(src, dest, src_size, dest_size):
     bytes_read = src.tell() - original_src
     if bytes_read != src_size:
         print('Size mismatch, got {:<8X} but read {:<8X}'.format(src_size, bytes_read))
+        exit(1)
     if bytes_written != dest_size:
         print('Size mismatch, got {:<8X} but wrote {:<8X}'.format(dest_size, bytes_written))
+        exit(1)
+    print('Done.')
+
+# Does not check bytes read or written
+def unlz2k(src, dest):
+    src.seek(0, 2)
+    end = src.tell()
+    src.seek(0)
+    while src.tell() < end:
+        lz2k = src.read(4)
+        if (lz2k != b'LZ2K'):
+            print('Not valid LZ2K file or chunk at {:<6X}'.format(src.tell()))
+            exit(1)
+        unpacked = int.from_bytes(src.read(4), byteorder="little")
+        packed = int.from_bytes(src.read(4), byteorder="little")
+        unlz2k_chunk(src, dest, packed, unpacked)
+    print('Done.')
 
 ################
 # TEST PROGRAM #
 ################
 
-
-src = open('4.GSC', 'rb')
-dest = open('4.GSC.dec', 'wb')
-packed = 0x1D647BA
-unpacked = 0x37701F4
-unlz2k(src, dest, packed, unpacked)
+if len(sys.argv) < 2:
+    print('Please specify a filename.')
+    exit(1)
+filename = sys.argv[1]
+src = open(filename, 'rb')
+dest = open(filename + '.dec', 'wb')
+unlz2k(src, dest)
 src.close()
 dest.close()
 

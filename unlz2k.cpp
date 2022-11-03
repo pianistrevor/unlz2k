@@ -1,12 +1,13 @@
 #include "unlz2k.hpp"
 #include <cstring>
 #include <iostream>
+#include <istream>
 
 // Globals that are used by other functions
 
 #define MAX_CHUNK_SIZE 0x40000
 
-uint8_t *compressedFile;
+uint8_t compressedFile[MAX_CHUNK_SIZE];
 size_t tmpSrcOffs;
 size_t tmpSrcSize;
 size_t tmpDestSize;
@@ -48,10 +49,30 @@ uint16_t readUint16(std::ifstream &src) {
   return data[0] | (data[1] << 8);
 }
 
+// This version does not check integrity. It relies on the rest of the
+// program!
+size_t unlz2k(std::ifstream &src, std::ofstream &dest) {
+  src.seekg(0, std::ios::end);
+  size_t fileEnd = src.tellg();
+  src.seekg(0);
+  while (src.tellg() < fileEnd) {
+    char lz2k[5];
+    src.read(lz2k, 4);
+    lz2k[4] = '\0';
+    if (strcmp(lz2k, "LZ2K") != 0) {
+      std::cerr << "Not valid LZ2K file or chunk at pos " << src.tellg()
+                << "\n";
+      return 1;
+    }
+    uint32_t unpacked = readUint32(src);
+    uint32_t packed = readUint32(src);
+    unlz2k_chunk(src, dest, packed, unpacked);
+  }
+  return 0;
+}
+
 size_t unlz2k(std::ifstream &src, std::ofstream &dest, size_t srcSize,
               size_t destSize) {
-  // Allocate chunk for compressed file
-  compressedFile = new uint8_t[MAX_CHUNK_SIZE];
   size_t bytesWritten = 0;
   while (bytesWritten < destSize) {
     char lz2k[5];
@@ -109,26 +130,20 @@ size_t unlz2k_chunk(std::ifstream &src, std::ofstream &dest, size_t srcSize,
 
 void loadIntoBitstream(uint8_t bits) {
   bitstream <<= bits;
-  uint8_t prev = previousBitAlign;
-  uint32_t data = lastByteRead;
-  if (bits > prev) {
+  if (bits > previousBitAlign) {
     do {
-      bits -= prev;
-      bitstream |= data << bits;
+      bits -= previousBitAlign;
+      bitstream |= lastByteRead << bits;
       if (tmpSrcOffs == tmpSrcSize) {
-        data = 0;
+        lastByteRead = 0;
       } else {
-        data = compressedFile[tmpSrcOffs++];
+        lastByteRead = compressedFile[tmpSrcOffs++];
       }
-      prev = 8;
-    } while (bits > prev);
-    lastByteRead = data;
+      previousBitAlign = 8;
+    } while (bits > previousBitAlign);
   }
-  prev -= bits;
-  bits = prev;
-  data >>= bits;
-  previousBitAlign = prev;
-  bitstream |= data;
+  previousBitAlign -= bits;
+  bitstream |= lastByteRead >> previousBitAlign;
 }
 
 void readAndDecrypt(size_t chunkSize, uint8_t *out) {

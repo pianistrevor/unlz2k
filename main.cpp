@@ -1,6 +1,5 @@
 #include "unlz2k.hpp"
 #include <cstring>
-#include <fstream>
 #include <iostream>
 #include <istream>
 #include <vector>
@@ -20,8 +19,6 @@ int main(int argc, char *argv[]) {
   src.open(filename, std::ios::in | std::ios::binary);
   std::ofstream dest;
   dest.open(destFilename, std::ios::out | std::ios::binary);
-  size_t packed = 0x1D647BA;
-  size_t unpacked = 0x37701F4;
-  unlz2k(src, dest, packed, unpacked);
+  unlz2k(src, dest);
   std::cout << "Done.\n";
 }
