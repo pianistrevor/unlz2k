@@ -1,11 +1,12 @@
 #include "unlz2k.hpp"
 #include <cstring>
+#include <intrin.h>
 #include <iostream>
 #include <istream>
 
-// Globals that are used by other functions
-
 #define MAX_CHUNK_SIZE 0x40000
+
+// Globals that are used by other functions
 
 uint8_t compressedFile[MAX_CHUNK_SIZE];
 size_t tmpSrcOffs;
@@ -16,37 +17,60 @@ uint8_t lastByteRead;
 uint8_t previousBitAlign;
 uint16_t chunksWithCurrentSetupLeft;
 uint32_t readOffset;
-uint32_t literalsToCopy;
+int32_t literalsToCopy;
 uint8_t tmpChunk[8192];
-uint8_t byteDict0[510];
-uint8_t byteDict1[20];
-uint16_t wordDict0[256];
-uint16_t wordDict1[1024];
-uint16_t wordDict2[1024];
-uint16_t wordDict3[4096];
-const char *lz2k = "LZ2K";
-uint32_t tmpCounter = 0;
+uint8_t smallByteDict[20];
+uint8_t largeByteDict[510];
+uint16_t smallWordDict[256];
+uint16_t parallelDict0[1024];
+uint16_t parallelDict1[1024];
+uint16_t largeWordDict[4096];
+uint32_t lz2k = 0x4C5A324B; // "LZ2K"
+
+enum ENDIAN { LITTLE, BIG };
+
+constexpr ENDIAN getEndianOrder() {
+  return ((0xFFFFFFFF & 1) == 0x00000001) ? LITTLE : BIG;
+}
+
+#define _ENDIANNESS_ getEndianOrder()
 
 size_t unlz2k_chunk(std::ifstream &, std::ofstream &, size_t, size_t);
 void loadIntoBitstream(uint8_t);
 uint32_t decodeBitstream();
 uint32_t decodeBitstreamForLiterals();
-void setupByteAndWordDicts(uint8_t, uint8_t, uint8_t);
-void setupByteDict0();
-void processDicts(uint16_t, uint8_t *, uint8_t, uint16_t *);
+void fillSmallDicts(uint8_t, uint8_t, uint8_t);
+void fillLargeDicts();
+void fillWordsUsingBytes(uint16_t, uint8_t *, uint8_t, uint16_t *);
 void readAndDecrypt(size_t, uint8_t *);
 void writeToFile(std::ofstream &, uint8_t *, size_t);
 
-uint32_t readUint32(std::ifstream &src) {
-  uint8_t data[4];
-  src.read((char *)data, sizeof(data));
-  return data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+// Checks if program stores data natively as big or little endian
+bool isNativeLE() {
+  uint16_t num = 1;
+  return *(char *)&num == 1;
 }
 
-uint16_t readUint16(std::ifstream &src) {
-  char data[2];
-  src.read(data, sizeof(data));
-  return data[0] | (data[1] << 8);
+// Read 32 bit unsigned integer from file
+uint32_t readUint32(std::ifstream &src, ENDIAN endianness) {
+  uint32_t data;
+  src.read((char *)&data, 4);
+  if (_ENDIANNESS_ != endianness) {
+    return _byteswap_ulong(data);
+  } else {
+    return data;
+  }
+}
+
+// Read 16 bit unsigned integer from file
+uint16_t readUint16(std::ifstream &src, ENDIAN endianness) {
+  uint16_t data;
+  src.read((char *)&data, 2);
+  if (_ENDIANNESS_ != endianness) {
+    return _byteswap_ushort(data);
+  } else {
+    return data;
+  }
 }
 
 // This version does not check integrity. It relies on the rest of the
@@ -56,16 +80,14 @@ size_t unlz2k(std::ifstream &src, std::ofstream &dest) {
   size_t fileEnd = src.tellg();
   src.seekg(0);
   while (src.tellg() < fileEnd) {
-    char lz2k[5];
-    src.read(lz2k, 4);
-    lz2k[4] = '\0';
-    if (strcmp(lz2k, "LZ2K") != 0) {
-      std::cerr << "Not valid LZ2K file or chunk at pos " << src.tellg()
-                << "\n";
+    uint32_t header = readUint32(src, ENDIAN::BIG);
+    if (header != lz2k) {
+      std::cerr << "Not valid LZ2K file or chunk at pos "
+                << (size_t)src.tellg() - 4 << "\n";
       return 1;
     }
-    uint32_t unpacked = readUint32(src);
-    uint32_t packed = readUint32(src);
+    uint32_t unpacked = readUint32(src, ENDIAN::LITTLE);
+    uint32_t packed = readUint32(src, ENDIAN::LITTLE);
     unlz2k_chunk(src, dest, packed, unpacked);
   }
   return 0;
@@ -75,21 +97,20 @@ size_t unlz2k(std::ifstream &src, std::ofstream &dest, size_t srcSize,
               size_t destSize) {
   size_t bytesWritten = 0;
   while (bytesWritten < destSize) {
-    char lz2k[5];
-    src.read(lz2k, 4);
-    lz2k[4] = '\0';
-    if (strcmp(lz2k, "LZ2K") != 0) {
-      std::cerr << "Not valid LZ2K file or chunk at pos " << src.tellg()
-                << "\n";
+    uint32_t header = readUint32(src, ENDIAN::BIG);
+    if (header != lz2k) {
+      std::cerr << "Not valid LZ2K file or chunk at pos "
+                << (size_t)src.tellg() - 4 << "\n";
+      return 1;
       return 1;
     }
-    uint32_t unpacked = readUint32(src);
-    uint32_t packed = readUint32(src);
+    uint32_t unpacked = readUint32(src, ENDIAN::LITTLE);
+    uint32_t packed = readUint32(src, ENDIAN::LITTLE);
     bytesWritten += unlz2k_chunk(src, dest, packed, unpacked);
   }
   if (src.tellg() != srcSize) {
     printf("Expected to read 0x%08x bytes, but wrote 0x%08x", srcSize,
-           src.tellg());
+           (size_t)src.tellg());
     return 1;
   }
   if (bytesWritten != destSize) {
@@ -148,21 +169,16 @@ void loadIntoBitstream(uint8_t bits) {
 
 void readAndDecrypt(size_t chunkSize, uint8_t *out) {
   uint32_t outputOffs = 0;
-  uint32_t tmpReadOffs = readOffset;
-  int32_t toCopy = --literalsToCopy;
-  if (toCopy >= 0) {
+  --literalsToCopy;
+  if (literalsToCopy >= 0) {
     do {
-      out[outputOffs++] = out[tmpReadOffs++];
-      tmpReadOffs &= 0x1FFF;
+      out[outputOffs++] = out[readOffset++];
+      readOffset &= 0x1FFF;
       if (outputOffs == chunkSize) {
-        literalsToCopy = toCopy;
-        readOffset = tmpReadOffs;
         return;
       }
-      toCopy--;
-    } while (toCopy >= 0);
-    literalsToCopy = toCopy;
-    readOffset = tmpReadOffs;
+      literalsToCopy--;
+    } while (literalsToCopy >= 0);
   }
   while (outputOffs < chunkSize) {
     uint32_t tmpVal = decodeBitstream();
@@ -171,19 +187,16 @@ void readAndDecrypt(size_t chunkSize, uint8_t *out) {
       if (outputOffs == chunkSize)
         return;
     } else {
-      toCopy = decodeBitstreamForLiterals();
-      tmpReadOffs = (outputOffs - toCopy - 1) & 0x1FFF;
+      uint32_t toCopy = decodeBitstreamForLiterals();
+      readOffset = (outputOffs - toCopy - 1) & 0x1FFF;
       toCopy = tmpVal - 254;
-      readOffset = tmpReadOffs;
       literalsToCopy = toCopy;
-      while (toCopy >= 0) {
-        out[outputOffs++] = out[tmpReadOffs++];
-        tmpReadOffs &= 0x1FFF;
-        readOffset = tmpReadOffs;
+      while (literalsToCopy >= 0) {
+        out[outputOffs++] = out[readOffset++];
+        readOffset &= 0x1FFF;
         if (outputOffs == chunkSize)
           return;
-        toCopy--;
-        literalsToCopy = toCopy;
+        literalsToCopy--;
       }
     }
   }
@@ -201,43 +214,43 @@ uint32_t decodeBitstream() {
   if (!chunksWithCurrentSetupLeft) {
     chunksWithCurrentSetupLeft = bitstream >> 16;
     loadIntoBitstream(16);
-    setupByteAndWordDicts(19, 5, 3);
-    setupByteDict0();
-    setupByteAndWordDicts(14, 4, -1);
+    fillSmallDicts(19, 5, 3);
+    fillLargeDicts();
+    fillSmallDicts(14, 4, -1);
   }
   chunksWithCurrentSetupLeft--;
-  uint16_t tmpVal = wordDict3[bitstream >> 20];
+  uint16_t tmpVal = largeWordDict[bitstream >> 20];
   if (tmpVal >= 510) {
     uint32_t mask = 0x80000;
     do {
       if (!(bitstream & mask)) {
-        tmpVal = wordDict1[tmpVal];
+        tmpVal = parallelDict0[tmpVal];
       } else {
-        tmpVal = wordDict2[tmpVal];
+        tmpVal = parallelDict1[tmpVal];
       }
       mask >>= 1;
     } while (tmpVal >= 510);
   }
-  uint8_t bits = byteDict0[tmpVal];
+  uint8_t bits = largeByteDict[tmpVal];
   loadIntoBitstream(bits);
   return tmpVal;
 }
 
 uint32_t decodeBitstreamForLiterals() {
   uint8_t tmpOffs = bitstream >> 24;
-  uint16_t tmpVal = wordDict0[tmpOffs];
+  uint16_t tmpVal = smallWordDict[tmpOffs];
   if (tmpVal >= 14) {
     uint32_t mask = 0x800000;
     do {
       if (!(bitstream & mask)) {
-        tmpVal = wordDict1[tmpVal];
+        tmpVal = parallelDict0[tmpVal];
       } else {
-        tmpVal = wordDict2[tmpVal];
+        tmpVal = parallelDict1[tmpVal];
       }
       mask >>= 1;
     } while (tmpVal >= 14);
   }
-  uint8_t bits = byteDict1[tmpVal];
+  uint8_t bits = smallByteDict[tmpVal];
   loadIntoBitstream(bits);
   if (!tmpVal)
     return 0;
@@ -249,17 +262,17 @@ uint32_t decodeBitstreamForLiterals() {
   return tmpBitstream + (1 << tmpVal);
 }
 
-void setupByteAndWordDicts(uint8_t length, uint8_t bits, uint8_t specialInd) {
+void fillSmallDicts(uint8_t length, uint8_t bits, uint8_t specialInd) {
   uint32_t tmpVal = bitstream >> (32 - bits);
   loadIntoBitstream(bits);
   if (!tmpVal) {
     tmpVal = bitstream >> (32 - bits);
     loadIntoBitstream(bits);
     if (length > 0) {
-      memset(byteDict1, 0, length);
+      memset(smallByteDict, 0, length);
     }
     for (int i = 0; i < 256; ++i) {
-      wordDict0[i] = tmpVal;
+      smallWordDict[i] = tmpVal;
     }
     return;
   }
@@ -282,60 +295,61 @@ void setupByteAndWordDicts(uint8_t length, uint8_t bits, uint8_t specialInd) {
       }
     }
     loadIntoBitstream(bits);
-    byteDict1[tmpVal2++] = tmpByte;
+    smallByteDict[tmpVal2++] = tmpByte;
     if (tmpVal2 == specialInd) {
       size_t specialLen = bitstream >> 30;
       loadIntoBitstream(2);
       if (specialLen) {
-        memset(byteDict1 + tmpVal2, 0, specialLen);
+        memset(smallByteDict + tmpVal2, 0, specialLen);
         tmpVal2 += specialLen;
       }
     }
   }
   if (tmpVal2 < length) {
-    memset(byteDict1 + tmpVal2, 0, length - tmpVal2);
+    memset(smallByteDict + tmpVal2, 0, length - tmpVal2);
   }
-  processDicts(length, byteDict1, 8, wordDict0);
+  fillWordsUsingBytes(length, smallByteDict, 8, smallWordDict);
   return;
 }
 
-void setupByteDict0() {
+void fillLargeDicts() {
   int16_t tmpVal = bitstream >> 23;
   loadIntoBitstream(9);
   if (!tmpVal) {
     tmpVal = bitstream >> 23;
     loadIntoBitstream(9);
-    memset(byteDict0, 0, 510);
+    memset(largeByteDict, 0, 510);
     for (int i = 0; i < 4096; ++i) {
-      wordDict3[i] = tmpVal;
+      largeWordDict[i] = tmpVal;
     }
     return;
   }
   uint16_t bytes = 0;
   if (tmpVal < 0) {
-    memset(byteDict0, 0, 510);
-    processDicts(510, byteDict0, 12, wordDict3);
+    // Does this ever happen?
+    memset(largeByteDict, 0, 510);
+    fillWordsUsingBytes(510, largeByteDict, 12, largeWordDict);
     return;
   }
   while (bytes < tmpVal) {
     uint8_t tmpLen = bitstream >> 24;
-    uint16_t tmpVal2 = wordDict0[tmpLen];
+    uint16_t tmpVal2 = smallWordDict[tmpLen];
     if (tmpVal2 >= 19) {
       uint32_t mask = 0x800000;
       do {
         if (!(bitstream & mask)) {
-          tmpVal2 = wordDict1[tmpVal2];
+          tmpVal2 = parallelDict0[tmpVal2];
         } else {
-          tmpVal2 = wordDict2[tmpVal2];
+          tmpVal2 = parallelDict1[tmpVal2];
         }
         mask >>= 1;
       } while (tmpVal2 >= 19);
     }
-    uint8_t bits = byteDict1[tmpVal2];
+    uint8_t bits = smallByteDict[tmpVal2];
     loadIntoBitstream(bits);
     if (tmpVal2 > 2) {
       tmpVal2 -= 2;
-      byteDict0[bytes++] = tmpVal2;
+      largeByteDict[bytes++] = tmpVal2;
     } else {
       if (!tmpVal2) {
         tmpLen = 1;
@@ -349,20 +363,20 @@ void setupByteDict0() {
         tmpLen = tmpVal2 + 20;
       }
       if (tmpLen) {
-        memset(byteDict0 + bytes, 0, tmpLen);
+        memset(largeByteDict + bytes, 0, tmpLen);
         bytes += tmpLen;
       }
     }
   }
   if (bytes < 510) {
-    memset(byteDict0 + bytes, 0, 510 - bytes);
+    memset(largeByteDict + bytes, 0, 510 - bytes);
   }
-  processDicts(510, byteDict0, 12, wordDict3);
+  fillWordsUsingBytes(510, largeByteDict, 12, largeWordDict);
   return;
 }
 
-void processDicts(uint16_t bytesLen, uint8_t *bytes, uint8_t pivot,
-                  uint16_t *words) {
+void fillWordsUsingBytes(uint16_t bytesLen, uint8_t *bytes, uint8_t pivot,
+                         uint16_t *words) {
   uint16_t srcDict[17] = {0};
   uint16_t destDict[18];
   destDict[1] = 0;
@@ -379,12 +393,12 @@ void processDicts(uint16_t bytesLen, uint8_t *bytes, uint8_t pivot,
     ind += 4;
     high += low;
     destDict[ind - 3] = low;
-    low = srcDict[ind - 2] << (shift - 1);
     destDict[ind - 2] = high;
+    low = srcDict[ind - 2] << (shift - 1);
     low += high;
     high = srcDict[ind - 1] << (shift - 2);
-    destDict[ind - 1] = low;
     high += low;
+    destDict[ind - 1] = low;
     destDict[ind] = high;
     shift -= 4;
   }
@@ -395,12 +409,12 @@ void processDicts(uint16_t bytesLen, uint8_t *bytes, uint8_t pivot,
   uint8_t tmpVal = 16 - pivot;
   uint8_t tmpValCopy = tmpVal;
   for (int i = 1; i <= pivot; ++i) {
-    destDict[i] >>= tmpVal;
+    destDict[i] >>= tmpValCopy;
     srcDict[i] = 1 << shift--;
   }
-  tmpVal--;
+  tmpValCopy--;
   for (int i = pivot + 1; i <= 16; ++i) {
-    srcDict[i] = 1 << tmpVal--;
+    srcDict[i] = 1 << tmpValCopy--;
   }
   uint16_t comp1 = destDict[pivot + 1];
   comp1 >>= 16 - pivot;
@@ -424,19 +438,19 @@ void processDicts(uint16_t bytesLen, uint8_t *bytes, uint8_t pivot,
       uint16_t srcVal = srcDict[tmpByte] + destVal;
       if (tmpByte > pivot) {
         uint16_t *dictPtr = words;
-        uint16_t tmpOffs = destVal >> tmpValCopy;
+        uint16_t tmpOffs = destVal >> tmpVal;
         uint8_t newLen = tmpByte - pivot;
         while (newLen) {
           if (!dictPtr[tmpOffs]) {
-            wordDict1[bytesLenCopy] = 0;
-            wordDict2[bytesLenCopy] = 0;
+            parallelDict0[bytesLenCopy] = 0;
+            parallelDict1[bytesLenCopy] = 0;
             dictPtr[tmpOffs] = bytesLenCopy++;
           }
           tmpOffs = dictPtr[tmpOffs];
           if (!(destVal & mask)) {
-            dictPtr = wordDict1;
+            dictPtr = parallelDict0;
           } else {
-            dictPtr = wordDict2;
+            dictPtr = parallelDict1;
           }
           destVal += destVal;
           newLen--;
