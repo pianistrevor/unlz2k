@@ -17,8 +17,21 @@ int main(int argc, char *argv[]) {
   strcat(destFilename, ".dec");
   std::ifstream src;
   src.open(filename, std::ios::in | std::ios::binary);
+  if (!src) {
+    std::cerr << "Cannot open source file.\n";
+    return 1;
+  }
   std::ofstream dest;
   dest.open(destFilename, std::ios::out | std::ios::binary);
-  unlz2k(src, dest);
+  if (!dest) {
+    std::cerr << "Cannot open destination file.\n";
+    return 1;
+  }
+  try {
+    unlz2k(src, dest);
+  } catch (int error) {
+    std::cerr << "unlz2k exited with return code: " << error << '\n';
+    return error;
+  }
   std::cout << "Done.\n";
 }

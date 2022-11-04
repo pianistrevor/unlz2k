@@ -6,4 +6,4 @@
 size_t unlz2k(std::ifstream &, std::ofstream &);
 size_t unlz2k(std::ifstream &, std::ofstream &, size_t, size_t);
 
-#endif
+#endif // UNLZ2K_H

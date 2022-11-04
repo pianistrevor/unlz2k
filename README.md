@@ -1,6 +1,8 @@
 # unlz2k
 Research project on the compression algorithm used by TT Games.
 
+The project's `build.bat` script requires the Visual Studio C++ Compiler (MSVC) to work. It generates the file `unlz2k.exe` in the project directory.
+
 ## Overview
 
 LZ2K is a custom compression algorithm used in video games, particularly those by Traveller's Tales Games. Game data is packed into ambiguous .DAT files, which have packed into them compressed and uncompressed files. Though newer compression methods are used in later games, the older games only use LZ2K for the files they compress.

@@ -1,14 +1,17 @@
 #include "unlz2k.hpp"
-#include <cstring>
-#include <intrin.h>
+#include <bit>
+#include <format>
 #include <iostream>
 #include <istream>
 
-#define MAX_CHUNK_SIZE 0x40000
+using ENDIAN = std::endian;
+
+#define _MAX_CHUNK_SIZE 0x40000
+#define _LZ2K 0x4C5A324B
 
 // Globals that are used by other functions
 
-uint8_t compressedFile[MAX_CHUNK_SIZE];
+char compressedFile[_MAX_CHUNK_SIZE];
 size_t tmpSrcOffs;
 size_t tmpSrcSize;
 size_t tmpDestSize;
@@ -25,15 +28,6 @@ uint16_t smallWordDict[256];
 uint16_t parallelDict0[1024];
 uint16_t parallelDict1[1024];
 uint16_t largeWordDict[4096];
-uint32_t lz2k = 0x4C5A324B; // "LZ2K"
-
-enum ENDIAN { LITTLE, BIG };
-
-constexpr ENDIAN getEndianOrder() {
-  return ((0xFFFFFFFF & 1) == 0x00000001) ? LITTLE : BIG;
-}
-
-#define _ENDIANNESS_ getEndianOrder()
 
 size_t unlz2k_chunk(std::ifstream &, std::ofstream &, size_t, size_t);
 void loadIntoBitstream(uint8_t);
@@ -45,32 +39,24 @@ void fillWordsUsingBytes(uint16_t, uint8_t *, uint8_t, uint16_t *);
 void readAndDecrypt(size_t, uint8_t *);
 void writeToFile(std::ofstream &, uint8_t *, size_t);
 
-// Checks if program stores data natively as big or little endian
-bool isNativeLE() {
-  uint16_t num = 1;
-  return *(char *)&num == 1;
-}
-
 // Read 32 bit unsigned integer from file
-uint32_t readUint32(std::ifstream &src, ENDIAN endianness) {
+[[nodiscard]] uint32_t readUint32(std::ifstream &src, ENDIAN endianness) {
   uint32_t data;
-  src.read((char *)&data, 4);
-  if (_ENDIANNESS_ != endianness) {
+  src.read(reinterpret_cast<char *>(&data), 4);
+  if (ENDIAN::native != endianness) {
     return _byteswap_ulong(data);
-  } else {
-    return data;
   }
+  return data;
 }
 
 // Read 16 bit unsigned integer from file
-uint16_t readUint16(std::ifstream &src, ENDIAN endianness) {
+[[nodiscard]] uint16_t readUint16(std::ifstream &src, ENDIAN endianness) {
   uint16_t data;
-  src.read((char *)&data, 2);
-  if (_ENDIANNESS_ != endianness) {
+  src.read(reinterpret_cast<char *>(&data), 2);
+  if (ENDIAN::native != endianness) {
     return _byteswap_ushort(data);
-  } else {
-    return data;
   }
+  return data;
 }
 
 // This version does not check integrity. It relies on the rest of the
@@ -79,46 +65,45 @@ size_t unlz2k(std::ifstream &src, std::ofstream &dest) {
   src.seekg(0, std::ios::end);
   size_t fileEnd = src.tellg();
   src.seekg(0);
+  size_t bytesWritten = 0;
   while (src.tellg() < fileEnd) {
-    uint32_t header = readUint32(src, ENDIAN::BIG);
-    if (header != lz2k) {
+    uint32_t header = readUint32(src, ENDIAN::big);
+    if (header != _LZ2K) {
       std::cerr << "Not valid LZ2K file or chunk at pos "
-                << (size_t)src.tellg() - 4 << "\n";
-      return 1;
+                << static_cast<size_t>(src.tellg()) - 4 << "\n";
+      throw 2;
     }
-    uint32_t unpacked = readUint32(src, ENDIAN::LITTLE);
-    uint32_t packed = readUint32(src, ENDIAN::LITTLE);
-    unlz2k_chunk(src, dest, packed, unpacked);
+    uint32_t unpacked = readUint32(src, ENDIAN::little);
+    uint32_t packed = readUint32(src, ENDIAN::little);
+    bytesWritten += unlz2k_chunk(src, dest, packed, unpacked);
   }
-  return 0;
+  return bytesWritten;
 }
-
 size_t unlz2k(std::ifstream &src, std::ofstream &dest, size_t srcSize,
               size_t destSize) {
   size_t bytesWritten = 0;
   while (bytesWritten < destSize) {
-    uint32_t header = readUint32(src, ENDIAN::BIG);
-    if (header != lz2k) {
+    uint32_t header = readUint32(src, ENDIAN::big);
+    if (header != _LZ2K) {
       std::cerr << "Not valid LZ2K file or chunk at pos "
-                << (size_t)src.tellg() - 4 << "\n";
-      return 1;
-      return 1;
+                << static_cast<size_t>(src.tellg()) - 4 << "\n";
+      throw 2;
     }
-    uint32_t unpacked = readUint32(src, ENDIAN::LITTLE);
-    uint32_t packed = readUint32(src, ENDIAN::LITTLE);
+    uint32_t unpacked = readUint32(src, ENDIAN::little);
+    uint32_t packed = readUint32(src, ENDIAN::little);
     bytesWritten += unlz2k_chunk(src, dest, packed, unpacked);
   }
   if (src.tellg() != srcSize) {
-    printf("Expected to read 0x%08x bytes, but wrote 0x%08x", srcSize,
-           (size_t)src.tellg());
-    return 1;
+    std::cerr << std::format("Expected to read 0x%08x bytes, but wrote 0x%08x",
+                             srcSize, static_cast<size_t>(src.tellg()));
+    throw 3;
   }
   if (bytesWritten != destSize) {
-    printf("Expected to write 0x%08x bytes, but wrote 0x%08x", destSize,
-           bytesWritten);
-    return 1;
+    std::cerr << std::format("Expected to write 0x%08x bytes, but wrote 0x%08x",
+                             destSize, bytesWritten);
+    throw 3;
   }
-  return 0;
+  return bytesWritten;
 }
 
 size_t unlz2k_chunk(std::ifstream &src, std::ofstream &dest, size_t srcSize,
@@ -127,7 +112,7 @@ size_t unlz2k_chunk(std::ifstream &src, std::ofstream &dest, size_t srcSize,
     return 0;
   }
   // Read file into memory location
-  src.read((char *)compressedFile, srcSize);
+  src.read(compressedFile, srcSize);
   tmpSrcOffs = 0;
   tmpSrcSize = srcSize;
   bitstream = 0;
@@ -170,15 +155,13 @@ void loadIntoBitstream(uint8_t bits) {
 void readAndDecrypt(size_t chunkSize, uint8_t *out) {
   uint32_t outputOffs = 0;
   --literalsToCopy;
-  if (literalsToCopy >= 0) {
-    do {
-      out[outputOffs++] = out[readOffset++];
-      readOffset &= 0x1FFF;
-      if (outputOffs == chunkSize) {
-        return;
-      }
-      literalsToCopy--;
-    } while (literalsToCopy >= 0);
+  while (literalsToCopy >= 0) {
+    out[outputOffs++] = out[readOffset++];
+    readOffset &= 0x1FFF;
+    if (outputOffs == chunkSize) {
+      return;
+    }
+    literalsToCopy--;
   }
   while (outputOffs < chunkSize) {
     uint32_t tmpVal = decodeBitstream();
@@ -187,10 +170,9 @@ void readAndDecrypt(size_t chunkSize, uint8_t *out) {
       if (outputOffs == chunkSize)
         return;
     } else {
-      uint32_t toCopy = decodeBitstreamForLiterals();
-      readOffset = (outputOffs - toCopy - 1) & 0x1FFF;
-      toCopy = tmpVal - 254;
-      literalsToCopy = toCopy;
+      uint32_t lbOffs = decodeBitstreamForLiterals();
+      readOffset = (outputOffs - lbOffs - 1) & 0x1FFF;
+      literalsToCopy = tmpVal - 254;
       while (literalsToCopy >= 0) {
         out[outputOffs++] = out[readOffset++];
         readOffset &= 0x1FFF;
@@ -201,16 +183,16 @@ void readAndDecrypt(size_t chunkSize, uint8_t *out) {
     }
   }
   if (outputOffs > chunkSize) {
-    std::cerr << "Error: went farther than given length\n";
-    return;
+    std::cerr << "Error: read farther than given length\n";
+    throw 4;
   }
 }
 
 void writeToFile(std::ofstream &outFile, uint8_t *data, size_t length) {
-  outFile.write((const char *)data, length);
+  outFile.write(reinterpret_cast<char *>(data), length);
 }
 
-uint32_t decodeBitstream() {
+[[nodiscard]] uint32_t decodeBitstream() {
   if (!chunksWithCurrentSetupLeft) {
     chunksWithCurrentSetupLeft = bitstream >> 16;
     loadIntoBitstream(16);
@@ -236,7 +218,7 @@ uint32_t decodeBitstream() {
   return tmpVal;
 }
 
-uint32_t decodeBitstreamForLiterals() {
+[[nodiscard]] uint32_t decodeBitstreamForLiterals() {
   uint8_t tmpOffs = bitstream >> 24;
   uint16_t tmpVal = smallWordDict[tmpOffs];
   if (tmpVal >= 14) {
@@ -297,7 +279,7 @@ void fillSmallDicts(uint8_t length, uint8_t bits, uint8_t specialInd) {
     loadIntoBitstream(bits);
     smallByteDict[tmpVal2++] = tmpByte;
     if (tmpVal2 == specialInd) {
-      size_t specialLen = bitstream >> 30;
+      uint8_t specialLen = bitstream >> 30;
       loadIntoBitstream(2);
       if (specialLen) {
         memset(smallByteDict + tmpVal2, 0, specialLen);
@@ -404,6 +386,7 @@ void fillWordsUsingBytes(uint16_t bytesLen, uint8_t *bytes, uint8_t pivot,
   }
   if (destDict[17]) {
     std::cerr << "Bad table\n";
+    throw 5;
   }
   shift = pivot - 1;
   uint8_t tmpVal = 16 - pivot;
