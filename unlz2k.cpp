@@ -1,8 +1,8 @@
 #include "unlz2k.hpp"
+#include "filereading.hpp"
 #include <bit>
 #include <format>
 #include <iostream>
-#include <istream>
 
 using ENDIAN = std::endian;
 
@@ -38,26 +38,6 @@ void fillLargeDicts();
 void fillWordsUsingBytes(uint16_t, uint8_t *, uint8_t, uint16_t *);
 void readAndDecrypt(size_t, uint8_t *);
 void writeToFile(std::ofstream &, uint8_t *, size_t);
-
-// Read 32 bit unsigned integer from file
-[[nodiscard]] uint32_t readUint32(std::ifstream &src, ENDIAN endianness) {
-  uint32_t data;
-  src.read(reinterpret_cast<char *>(&data), 4);
-  if (ENDIAN::native != endianness) {
-    return _byteswap_ulong(data);
-  }
-  return data;
-}
-
-// Read 16 bit unsigned integer from file
-[[nodiscard]] uint16_t readUint16(std::ifstream &src, ENDIAN endianness) {
-  uint16_t data;
-  src.read(reinterpret_cast<char *>(&data), 2);
-  if (ENDIAN::native != endianness) {
-    return _byteswap_ushort(data);
-  }
-  return data;
-}
 
 // This version does not check integrity. It relies on the rest of the
 // program!
