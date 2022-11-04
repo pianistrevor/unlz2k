@@ -1,5 +1,5 @@
 # VSCode if used
 .vs/
 .vscode/
-# Build folders
+# Build folders in case I forgot to delete them
 x64/
