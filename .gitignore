@@ -1,3 +1,5 @@
+# VSCode if used
+.vs/
 .vscode/
-*.obj
-*.exe
+# Build folders
+x64/
