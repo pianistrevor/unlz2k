@@ -440,7 +440,7 @@ def unlz2k(src, dest):
 # TEST PROGRAM #
 ################
 
-if len(sys.argv) < 2:
+""" if len(sys.argv) < 2:
     print('Please specify a filename.')
     exit(1)
 filename = sys.argv[1]
@@ -449,4 +449,4 @@ dest = open(filename + '.dec', 'wb')
 unlz2k(src, dest)
 src.close()
 dest.close()
-
+"""

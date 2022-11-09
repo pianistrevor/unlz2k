@@ -6,13 +6,21 @@
 
 using ENDIAN = std::endian;
 
+[[nodiscard]] inline unsigned int byteswap32(unsigned int data) {
+    return (data >> 24) | (data << 24) | (data >> 8 & 0xFF00) | (data << 8 & 0xFF0000);
+}
+
+[[nodiscard]] inline unsigned short int byteswap16(unsigned short int data) {
+    return (data >> 8) | (data << 8);
+}
+
 // Read 32 bit unsigned integer from file
 [[nodiscard]] inline unsigned int readUint32(std::ifstream& src,
     ENDIAN endianness) {
     unsigned int data;
     src.read(reinterpret_cast<char*>(&data), 4);
     if (ENDIAN::native != endianness) {
-        return _byteswap_ulong(data);
+        return byteswap32(data);
     }
     return data;
 }
@@ -23,7 +31,7 @@ using ENDIAN = std::endian;
     unsigned short int data;
     src.read(reinterpret_cast<char*>(&data), 2);
     if (ENDIAN::native != endianness) {
-        return _byteswap_ushort(data);
+        return byteswap16(data);
     }
     return data;
 }
@@ -33,7 +41,7 @@ using ENDIAN = std::endian;
     unsigned int data;
     src.read(reinterpret_cast<char*>(&data), 4);
     if (ENDIAN::native != endianness) {
-        return static_cast<int>(_byteswap_ulong(data));
+        return static_cast<int>(byteswap32(data));
     }
     return data;
 }
@@ -44,7 +52,7 @@ using ENDIAN = std::endian;
     unsigned short int data;
     src.read(reinterpret_cast<char*>(&data), 2);
     if (ENDIAN::native != endianness) {
-        return static_cast<short int>(_byteswap_ushort(data));
+        return static_cast<short int>(byteswap16(data));
     }
     return data;
 }

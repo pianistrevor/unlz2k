@@ -9,7 +9,7 @@
 
 #include <fstream>
 
-extern UNLZ2K_API size_t unlz2k(std::ifstream&, std::ofstream&);
-extern UNLZ2K_API size_t unlz2k(std::ifstream&, std::ofstream&, size_t, size_t);
+extern UNLZ2K_API size_t unlz2k(std::ifstream &src, std::ofstream &dest);
+extern UNLZ2K_API size_t unlz2k(std::ifstream &src, std::ofstream &dest, size_t srcSize, size_t destSize);
 
 #endif // UNLZ2K_H
