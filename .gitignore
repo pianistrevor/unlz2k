@@ -3,3 +3,4 @@
 .vscode/
 # Build folders in case I forgot to delete them
 x64/
+unlz2k/x64

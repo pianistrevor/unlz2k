@@ -92,6 +92,9 @@ size_t unlz2k_chunk(std::ifstream &src, std::ofstream &dest, size_t srcSize,
   if (!destSize) {
     return 0;
   }
+#ifdef _DEBUG
+  std::cout << std::format("Chunk of size: {:X}\n", srcSize);
+#endif
   // Read file into memory location
   src.read(compressedFile, srcSize);
   tmpSrcOffs = 0;
@@ -239,7 +242,7 @@ void fillSmallDicts(uint8_t length, uint8_t bits, uint8_t specialInd) {
     }
     return;
   }
-  uint32_t tmpVal2 = 0;
+  uint8_t tmpVal2 = 0;
   while (tmpVal2 < tmpVal) {
     uint8_t tmpByte = bitstream >> 29;
     uint8_t bits = 3;
@@ -269,7 +272,7 @@ void fillSmallDicts(uint8_t length, uint8_t bits, uint8_t specialInd) {
     }
   }
   if (tmpVal2 < length) {
-    memset(smallByteDict + tmpVal2, 0, length - static_cast<size_t>(tmpVal2));
+    memset(smallByteDict + tmpVal2, 0, length - tmpVal2);
   }
   fillWordsUsingBytes(length, smallByteDict, 8, smallWordDict);
   return;
@@ -295,7 +298,7 @@ void fillLargeDicts() {
     return;
   }
   while (bytes < tmpVal) {
-    uint8_t tmpLen = bitstream >> 24;
+    uint16_t tmpLen = bitstream >> 24;
     uint16_t tmpVal2 = smallWordDict[tmpLen];
     if (tmpVal2 >= 19) {
       uint32_t mask = 0x800000;
@@ -367,6 +370,33 @@ void fillWordsUsingBytes(uint16_t bytesLen, uint8_t *bytes, uint8_t pivot,
   }
   if (destDict[17]) {
     std::cerr << "Bad table\n";
+#ifdef _DEBUG
+    // Bytes
+    std::cerr << "Bytes\n";
+    for (int i = 0; i < bytesLen; ++i) {
+        std::cerr << (int)bytes[i] << ' ';
+    }
+    std::cerr << '\n';
+    // Words
+    std::cerr << "Words\n";
+    uint32_t tmpLen = bytesLen == 510 ? 4096 : 256;
+    for (int i = 0; i < tmpLen; ++i) {
+        std::cerr << words[i] << ' ';
+    }
+    std::cerr << '\n';
+    // Src dict
+    std::cerr << "Src dict\n";
+    for (int i = 0; i < 17; ++i) {
+        std::cerr << srcDict[i] << ' ';
+    }
+    std::cerr << '\n';
+    // Dest dict
+    std::cerr << "Dest dict\n";
+    for (int i = 0; i < 18; ++i) {
+        std::cerr << destDict[i] << ' ';
+    }
+    std::cerr << '\n';
+#endif
     throw 5;
   }
   shift = pivot - 1;
